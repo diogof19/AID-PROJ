@@ -22,8 +22,8 @@ DROP TABLE IF EXISTS reviewer;
 
 
 -- all properties are not null unless otherwise specified!
--- all ids start in 1 
--- reviewer_id is already defined
+-- autoincrement ids start in 1
+-- reviewer_id, host_id is already defined
 
 CREATE TABLE reviewer (
     id INT PRIMARY KEY AUTO_INCREMENT,
