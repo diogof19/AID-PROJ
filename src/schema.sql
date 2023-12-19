@@ -1,11 +1,22 @@
 DROP TABLE IF EXISTS review;
 DROP TABLE IF EXISTS listing;
+
+DROP TABLE IF EXISTS neighbourhood_based_listing_statistics;
+DROP TABLE IF EXISTS city_based_listing_statistics;
+DROP TABLE IF EXISTS state_based_listing_statistics;
+DROP TABLE IF EXISTS country_based_listing_statistics;
+
 DROP TABLE IF EXISTS location;
+DROP TABLE IF EXISTS neighbourhood;
+DROP TABLE IF EXISTS city;
+DROP TABLE IF EXISTS state;
+DROP TABLE IF EXISTS country;
+
 DROP TABLE IF EXISTS date;
 DROP TABLE IF EXISTS host;
 DROP TABLE IF EXISTS property;
 DROP TABLE IF EXISTS reviewer;
-DROP TABLE IF EXISTS location_based_listing_statistics;
+
 
 
 -- all properties are not null unless otherwise specified!
@@ -13,7 +24,7 @@ DROP TABLE IF EXISTS location_based_listing_statistics;
 
 CREATE TABLE reviewer (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    reviewer_name VARCHAR(50)
+    name VARCHAR(100)
 );
 
 CREATE TABLE date (
@@ -30,30 +41,56 @@ CREATE TABLE date (
 
 CREATE TABLE property (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    accommodates INT NOT NULL,
-    bedrooms INT NOT NULL,
-    beds INT NOT NULL,
-    amenities TEXT NOT NULL, 
-    room_type VARCHAR(50) NOT NULL,
-    property_type VARCHAR(50) NOT NULL,
-    bathrooms VARCHAR(50) NOT NULL
+    accommodates INT,
+    bedrooms INT,
+    beds INT,
+    amenities TEXT, 
+    room_type VARCHAR(100),
+    property_type VARCHAR(100),
+    bathrooms VARCHAR(100)
 );
 
 CREATE TABLE host (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    name VARCHAR(50) NOT NULL,
-    description TEXT NOT NULL,
-    host_url VARCHAR(255) NOT NULL,
-    host_total_listings_count INT NOT NULL,
-    is_superhost BOOLEAN NOT NULL,
-    has_profile_pic BOOLEAN NOT NULL,
-    has_identity_verified BOOLEAN NOT NULL,
-    host_response_id INT NOT NULL,
-    host_response_time VARCHAR(50) NOT NULL,
-    host_response_rate FLOAT NOT NULL,
-    host_acceptance_rate FLOAT NOT NULL,
-    host_verifications_id INT NOT NULL,
-    host_verifications TEXT NOT NULL
+    name VARCHAR(50),
+    description TEXT,
+    host_url VARCHAR(255),
+    host_total_listings_count INT,
+    is_superhost BOOLEAN,
+    has_profile_pic BOOLEAN,
+    has_identity_verified BOOLEAN,
+    host_response_id INT,
+    host_response_time VARCHAR(50),
+    host_response_rate FLOAT,
+    host_acceptance_rate FLOAT,
+    host_verifications_id INT,
+    host_verifications TEXT
+);
+
+CREATE TABLE country (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    country VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE state (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    state VARCHAR(100) NOT NULL,
+    country_id INT NOT NULL,
+    FOREIGN KEY (country_id) REFERENCES country(id)
+);
+
+CREATE TABLE city (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    city VARCHAR(100) NOT NULL,
+    state_id INT NOT NULL,
+    FOREIGN KEY (state_id) REFERENCES state(id)
+);
+
+CREATE TABLE neighbourhood (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    neighbourhood VARCHAR(100) NOT NULL,
+    city_id INT NOT NULL,
+    FOREIGN KEY (city_id) REFERENCES city(id)
 );
 
 CREATE TABLE location (
@@ -61,13 +98,7 @@ CREATE TABLE location (
     latitude FLOAT NOT NULL,
     longitude FLOAT NOT NULL,
     neighbourhood_id INT NOT NULL,
-    neighborhood VARCHAR(100) NOT NULL,
-    city_id INT NOT NULL,
-    city VARCHAR(100) NOT NULL,
-    state_id INT NOT NULL,
-    state VARCHAR(100) NOT NULL,
-    country_id INT NOT NULL,
-    country VARCHAR(100) NOT NULL
+    FOREIGN KEY (neighbourhood_id) REFERENCES neighbourhood(id)
 );
 
 CREATE TABLE listing (
@@ -112,12 +143,175 @@ CREATE TABLE review (
     FOREIGN KEY (listing_id) REFERENCES listing(id)
 );
 
-CREATE TABLE location_based_listing_statistics (
-    -- trigger
+
+-- triggers
+
+CREATE TABLE neighbourhood_based_listing_statistics (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    -- quantos ids para pôr
+    neighbourhood_id INT NOT NULL,
     price_min FLOAT NOT NULL,
     price_max FLOAT NOT NULL,
-    price_average FLOAT NOT NULL 
+    price_average FLOAT NOT NULL,
+    FOREIGN KEY (neighbourhood_id) REFERENCES neighbourhood(id)
 );
 
+CREATE TABLE city_based_listing_statistics (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    city_id INT NOT NULL,
+    price_min FLOAT NOT NULL,
+    price_max FLOAT NOT NULL,
+    price_average FLOAT NOT NULL,
+    FOREIGN KEY (city_id) REFERENCES city(id)
+);
+
+CREATE TABLE state_based_listing_statistics (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    state_id INT NOT NULL,
+    price_min FLOAT NOT NULL,
+    price_max FLOAT NOT NULL,
+    price_average FLOAT NOT NULL,
+    FOREIGN KEY (state_id) REFERENCES state(id)
+);
+
+CREATE TABLE country_based_listing_statistics (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    country_id INT NOT NULL,
+    price_min FLOAT NOT NULL,
+    price_max FLOAT NOT NULL,
+    price_average FLOAT NOT NULL,
+    FOREIGN KEY (country_id) REFERENCES country(id)
+);
+
+-- Trigger for AFTER INSERT on listing
+DELIMITER //
+CREATE TRIGGER after_listing_insert_neighbourhood
+AFTER INSERT ON listing
+FOR EACH ROW
+BEGIN
+    DECLARE neighbourhood_id_val INT;
+    DECLARE price_val FLOAT;
+
+    -- Get the neighbourhood_id and price for the newly inserted listing
+    SELECT l.location_id, l.price
+    INTO neighbourhood_id_val, price_val
+    FROM location l
+    WHERE l.id = NEW.location_id;
+
+    -- Update or insert into neighbourhood_based_listing_statistics
+    INSERT INTO neighbourhood_based_listing_statistics (neighbourhood_id, price_min, price_max, price_average)
+    VALUES (neighbourhood_id_val, price_val, price_val, price_val)
+    ON DUPLICATE KEY UPDATE
+        price_min = LEAST(price_val, price_min),
+        price_max = GREATEST(price_val, price_max),
+        price_average = (
+           	SELECT AVG(l2.price)
+            FROM listing l2
+            WHERE l2.location_id IN (
+                SELECT l3.id
+                FROM location l3
+                WHERE l3.neighbourhood_id = neighbourhood_id_val
+            )
+        );
+END;
+//
+DELIMITER ;
+
+/* DELIMITER //
+CREATE TRIGGER after_listing_insert_city
+AFTER INSERT ON listing
+FOR EACH ROW
+BEGIN
+    DECLARE city_id_val INT;
+    DECLARE price_val FLOAT;
+
+    SELECT neighbourhood.city_id, NEW.price
+    INTO city_id_val, price_val
+    FROM location JOIN neighbourhood ON location.neighbourhood_id = neighbourhood.id
+    WHERE location.id = NEW.location_id;
+
+    INSERT INTO city_based_listing_statistics (city_id, price_min, price_max, price_average)
+    VALUES (city_id_val, price_val, price_val, price_val)
+    ON DUPLICATE KEY UPDATE
+        price_min = LEAST(price_val, price_min),
+        price_max = GREATEST(price_val, price_max),
+        price_average = (
+            SELECT AVG(price)
+            FROM listing
+            WHERE location_id IN (
+                SELECT id
+                FROM location
+                JOIN neighbourhood ON location.neighbourhood_id = neighbourhood.id
+                WHERE neighbourhood.city_id = city_id_val
+            )
+        );
+END;
+//
+DELIMITER ;
+
+DELIMITER //
+CREATE TRIGGER after_listing_update
+AFTER UPDATE ON listing
+FOR EACH ROW
+BEGIN
+    DECLARE neighbourhood_id_val INT;
+    DECLARE price_val FLOAT;
+
+    -- Get the neighbourhood_id and price for the updated listing
+    SELECT location.neighbourhood_id, NEW.price
+    INTO neighbourhood_id_val, price_val
+    FROM location
+    WHERE location.id = NEW.location_id;
+
+    -- Update or insert into neighbourhood_based_listing_statistics
+    INSERT INTO neighbourhood_based_listing_statistics (neighbourhood_id, price_min, price_max, price_average)
+    VALUES (neighbourhood_id_val, price_val, price_val, price_val)
+    ON DUPLICATE KEY UPDATE
+        price_min = LEAST(price_val, price_min),
+        price_max = GREATEST(price_val, price_max),
+        price_average = (
+            SELECT AVG(price)
+            FROM listing
+            WHERE location_id IN (
+                SELECT id
+                FROM location
+                WHERE neighbourhood_id = neighbourhood_id_val
+            )
+        );
+END;
+//
+DELIMITER ;
+
+DELIMITER //
+CREATE TRIGGER after_listing_update_city
+AFTER UPDATE ON listing
+FOR EACH ROW
+BEGIN
+    DECLARE city_id_val INT;
+    DECLARE price_val FLOAT;
+
+    -- Get the city_id and price for the updated listing
+    SELECT neighbourhood.city_id , NEW.price
+    INTO city_id_val, price_val
+    FROM location
+    JOIN neighbourhood ON location.neighbourhood_id = neighbourhood.id
+    WHERE location.id = NEW.location_id;
+
+    -- Update or insert into city_based_listing_statistics
+    INSERT INTO city_based_listing_statistics (city_id, price_min, price_max, price_average)
+    VALUES (city_id_val, price_val, price_val, price_val)
+    ON DUPLICATE KEY UPDATE
+        price_min = LEAST(price_val, price_min),
+        price_max = GREATEST(price_val, price_max),
+        price_average = (
+            SELECT AVG(price)
+            FROM listing
+            WHERE location_id IN (
+                SELECT id
+                FROM location
+                JOIN neighbourhood ON location.neighbourhood_id = neighbourhood.id
+                WHERE neighbourhood.city_id = city_id_val
+            )
+        );
+END;
+//
+DELIMITER ; */
