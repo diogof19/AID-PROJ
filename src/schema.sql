@@ -108,21 +108,21 @@ CREATE TABLE listing (
     location_id INT NOT NULL,
     price FLOAT NOT NULL,
     description TEXT,
+    
+    review_scores_rating INT,
+    review_scores_accuracy INT,
+    review_scores_cleanliness INT,
+    review_scores_checkin INT,
+    review_scores_communication INT,
+    review_scores_location INT,
+    review_scores_value INT,
+    review_per_month FLOAT,
 
-    review_scores_rating INT NOT NULL,
-    review_scores_accuracy INT NOT NULL,
-    review_scores_cleanliness INT NOT NULL,
-    review_scores_checkin INT NOT NULL,
-    review_scores_communication INT NOT NULL,
-    review_scores_location INT NOT NULL,
-    review_scores_value INT NOT NULL,
-    review_per_month FLOAT NOT NULL,
-
-    availability_30 INT NOT NULL,
-    availability_60 INT NOT NULL,
-    availability_90 INT NOT NULL,
-    availability_365 INT NOT NULL,
-    review_count INT NOT NULL, -- trigger after creation review
+    availability_30 INT,
+    availability_60 INT,
+    availability_90 INT,
+    availability_365 INT,
+    review_count INT, -- trigger after creation review
     FOREIGN KEY (property_id) REFERENCES property(id),
     FOREIGN KEY (host_id) REFERENCES host(id),
     FOREIGN KEY (location_id) REFERENCES location(id)
@@ -143,12 +143,9 @@ CREATE TABLE review (
     FOREIGN KEY (listing_id) REFERENCES listing(id)
 );
 
-
--- triggers
-
+-- Aggregations
 CREATE TABLE neighbourhood_based_listing_statistics (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    neighbourhood_id INT NOT NULL,
+    neighbourhood_id INT PRIMARY KEY,
     price_min FLOAT NOT NULL,
     price_max FLOAT NOT NULL,
     price_average FLOAT NOT NULL,
@@ -156,8 +153,7 @@ CREATE TABLE neighbourhood_based_listing_statistics (
 );
 
 CREATE TABLE city_based_listing_statistics (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    city_id INT NOT NULL,
+    city_id INT PRIMARY KEY,
     price_min FLOAT NOT NULL,
     price_max FLOAT NOT NULL,
     price_average FLOAT NOT NULL,
@@ -165,8 +161,7 @@ CREATE TABLE city_based_listing_statistics (
 );
 
 CREATE TABLE state_based_listing_statistics (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    state_id INT NOT NULL,
+    state_id INT PRIMARY KEY,
     price_min FLOAT NOT NULL,
     price_max FLOAT NOT NULL,
     price_average FLOAT NOT NULL,
@@ -174,15 +169,27 @@ CREATE TABLE state_based_listing_statistics (
 );
 
 CREATE TABLE country_based_listing_statistics (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    country_id INT NOT NULL,
+    country_id INT PRIMARY KEY,
     price_min FLOAT NOT NULL,
     price_max FLOAT NOT NULL,
     price_average FLOAT NOT NULL,
     FOREIGN KEY (country_id) REFERENCES country(id)
 );
 
--- Trigger for AFTER INSERT on listing
+-- Trigger to update review_count on the listing table after a review is created
+DELIMITER //
+CREATE TRIGGER after_review_insert
+AFTER INSERT ON review
+FOR EACH ROW
+BEGIN
+    UPDATE listing
+    SET review_count = (SELECT COUNT(*) FROM review WHERE listing_id = NEW.listing_id)
+    WHERE id = NEW.listing_id;
+END;
+//
+DELIMITER ;
+
+-- Triggers for AFTER INSERT on listing to create Aggregations
 DELIMITER //
 CREATE TRIGGER after_listing_insert_neighbourhood
 AFTER INSERT ON listing
@@ -191,13 +198,11 @@ BEGIN
     DECLARE neighbourhood_id_val INT;
     DECLARE price_val FLOAT;
 
-    -- Get the neighbourhood_id and price for the newly inserted listing
-    SELECT l.location_id, l.price
+    SELECT l.neighbourhood_id, NEW.price
     INTO neighbourhood_id_val, price_val
     FROM location l
     WHERE l.id = NEW.location_id;
 
-    -- Update or insert into neighbourhood_based_listing_statistics
     INSERT INTO neighbourhood_based_listing_statistics (neighbourhood_id, price_min, price_max, price_average)
     VALUES (neighbourhood_id_val, price_val, price_val, price_val)
     ON DUPLICATE KEY UPDATE
@@ -216,7 +221,7 @@ END;
 //
 DELIMITER ;
 
-/* DELIMITER //
+DELIMITER //
 CREATE TRIGGER after_listing_insert_city
 AFTER INSERT ON listing
 FOR EACH ROW
@@ -238,7 +243,7 @@ BEGIN
             SELECT AVG(price)
             FROM listing
             WHERE location_id IN (
-                SELECT id
+                SELECT location.id
                 FROM location
                 JOIN neighbourhood ON location.neighbourhood_id = neighbourhood.id
                 WHERE neighbourhood.city_id = city_id_val
@@ -249,22 +254,21 @@ END;
 DELIMITER ;
 
 DELIMITER //
-CREATE TRIGGER after_listing_update
-AFTER UPDATE ON listing
+CREATE TRIGGER after_listing_insert_state
+AFTER INSERT ON listing
 FOR EACH ROW
 BEGIN
-    DECLARE neighbourhood_id_val INT;
+    DECLARE state_id_val INT;
     DECLARE price_val FLOAT;
 
-    -- Get the neighbourhood_id and price for the updated listing
-    SELECT location.neighbourhood_id, NEW.price
-    INTO neighbourhood_id_val, price_val
-    FROM location
-    WHERE location.id = NEW.location_id;
+    SELECT c.state_id, NEW.price
+    INTO state_id_val, price_val
+    FROM location l JOIN neighbourhood n ON l.neighbourhood_id = n.id
+    	JOIN city c ON c.id = n.city_id
+    WHERE l.id = NEW.location_id;
 
-    -- Update or insert into neighbourhood_based_listing_statistics
-    INSERT INTO neighbourhood_based_listing_statistics (neighbourhood_id, price_min, price_max, price_average)
-    VALUES (neighbourhood_id_val, price_val, price_val, price_val)
+    INSERT INTO state_based_listing_statistics (state_id, price_min, price_max, price_average)
+    VALUES (state_id_val, price_val, price_val, price_val)
     ON DUPLICATE KEY UPDATE
         price_min = LEAST(price_val, price_min),
         price_max = GREATEST(price_val, price_max),
@@ -272,9 +276,77 @@ BEGIN
             SELECT AVG(price)
             FROM listing
             WHERE location_id IN (
-                SELECT id
-                FROM location
-                WHERE neighbourhood_id = neighbourhood_id_val
+                SELECT l.id
+                FROM location l JOIN neighbourhood n ON l.neighbourhood_id = n.id
+    				JOIN city c ON c.id = n.city_id
+                WHERE c.state_id = state_id_val
+            )
+        );
+END;
+//
+DELIMITER ;
+
+DELIMITER //
+CREATE TRIGGER after_listing_insert_country
+AFTER INSERT ON listing
+FOR EACH ROW
+BEGIN
+    DECLARE country_id_val INT;
+    DECLARE price_val FLOAT;
+
+    SELECT s.country_id, NEW.price
+    INTO country_id_val, price_val
+    FROM location l JOIN neighbourhood n ON l.neighbourhood_id = n.id
+    	JOIN city c ON c.id = n.city_id
+    	JOIN state s ON s.id = c.state_id
+    WHERE l.id = NEW.location_id;
+
+    INSERT INTO country_based_listing_statistics (country_id, price_min, price_max, price_average)
+    VALUES (country_id_val, price_val, price_val, price_val)
+    ON DUPLICATE KEY UPDATE
+        price_min = LEAST(price_val, price_min),
+        price_max = GREATEST(price_val, price_max),
+        price_average = (
+            SELECT AVG(price)
+            FROM listing
+            WHERE location_id IN (
+                SELECT l.id
+                FROM location l JOIN neighbourhood n ON l.neighbourhood_id = n.id
+    				JOIN city c ON c.id = n.city_id
+    				JOIN state s ON s.id = c.state_id
+                WHERE s.country_id = country_id_val
+            )
+        );
+END;
+//
+DELIMITER ;
+
+-- Triggers for AFTER UPDATE on listing to update Aggregations
+DELIMITER //
+CREATE TRIGGER after_listing_update_neighbourhood
+AFTER UPDATE ON listing
+FOR EACH ROW
+BEGIN
+    DECLARE neighbourhood_id_val INT;
+    DECLARE price_val FLOAT;
+
+    SELECT l.neighbourhood_id, NEW.price
+    INTO neighbourhood_id_val, price_val
+    FROM location l
+    WHERE l.id = NEW.location_id;
+
+    INSERT INTO neighbourhood_based_listing_statistics (neighbourhood_id, price_min, price_max, price_average)
+    VALUES (neighbourhood_id_val, price_val, price_val, price_val)
+    ON DUPLICATE KEY UPDATE
+        price_min = LEAST(price_val, price_min),
+        price_max = GREATEST(price_val, price_max),
+        price_average = (
+           	SELECT AVG(l2.price)
+            FROM listing l2
+            WHERE l2.location_id IN (
+                SELECT l3.id
+                FROM location l3
+                WHERE l3.neighbourhood_id = neighbourhood_id_val
             )
         );
 END;
@@ -289,14 +361,11 @@ BEGIN
     DECLARE city_id_val INT;
     DECLARE price_val FLOAT;
 
-    -- Get the city_id and price for the updated listing
-    SELECT neighbourhood.city_id , NEW.price
+    SELECT neighbourhood.city_id, NEW.price
     INTO city_id_val, price_val
-    FROM location
-    JOIN neighbourhood ON location.neighbourhood_id = neighbourhood.id
+    FROM location JOIN neighbourhood ON location.neighbourhood_id = neighbourhood.id
     WHERE location.id = NEW.location_id;
 
-    -- Update or insert into city_based_listing_statistics
     INSERT INTO city_based_listing_statistics (city_id, price_min, price_max, price_average)
     VALUES (city_id_val, price_val, price_val, price_val)
     ON DUPLICATE KEY UPDATE
@@ -306,7 +375,7 @@ BEGIN
             SELECT AVG(price)
             FROM listing
             WHERE location_id IN (
-                SELECT id
+                SELECT location.id
                 FROM location
                 JOIN neighbourhood ON location.neighbourhood_id = neighbourhood.id
                 WHERE neighbourhood.city_id = city_id_val
@@ -314,4 +383,72 @@ BEGIN
         );
 END;
 //
-DELIMITER ; */
+DELIMITER ;
+
+DELIMITER //
+CREATE TRIGGER after_listing_update_state
+AFTER UPDATE ON listing
+FOR EACH ROW
+BEGIN
+    DECLARE state_id_val INT;
+    DECLARE price_val FLOAT;
+
+    SELECT c.state_id, NEW.price
+    INTO state_id_val, price_val
+    FROM location l JOIN neighbourhood n ON l.neighbourhood_id = n.id
+    	JOIN city c ON c.id = n.city_id
+    WHERE l.id = NEW.location_id;
+
+    INSERT INTO state_based_listing_statistics (state_id, price_min, price_max, price_average)
+    VALUES (state_id_val, price_val, price_val, price_val)
+    ON DUPLICATE KEY UPDATE
+        price_min = LEAST(price_val, price_min),
+        price_max = GREATEST(price_val, price_max),
+        price_average = (
+            SELECT AVG(price)
+            FROM listing
+            WHERE location_id IN (
+                SELECT l.id
+                FROM location l JOIN neighbourhood n ON l.neighbourhood_id = n.id
+    				JOIN city c ON c.id = n.city_id
+                WHERE c.state_id = state_id_val
+            )
+        );
+END;
+//
+DELIMITER ;
+
+DELIMITER //
+CREATE TRIGGER after_listing_update_country
+AFTER UPDATE ON listing
+FOR EACH ROW
+BEGIN
+    DECLARE country_id_val INT;
+    DECLARE price_val FLOAT;
+
+    SELECT s.country_id, NEW.price
+    INTO country_id_val, price_val
+    FROM location l JOIN neighbourhood n ON l.neighbourhood_id = n.id
+    	JOIN city c ON c.id = n.city_id
+    	JOIN state s ON s.id = c.state_id
+    WHERE l.id = NEW.location_id;
+
+    INSERT INTO country_based_listing_statistics (country_id, price_min, price_max, price_average)
+    VALUES (country_id_val, price_val, price_val, price_val)
+    ON DUPLICATE KEY UPDATE
+        price_min = LEAST(price_val, price_min),
+        price_max = GREATEST(price_val, price_max),
+        price_average = (
+            SELECT AVG(price)
+            FROM listing
+            WHERE location_id IN (
+                SELECT l.id
+                FROM location l JOIN neighbourhood n ON l.neighbourhood_id = n.id
+    				JOIN city c ON c.id = n.city_id
+    				JOIN state s ON s.id = c.state_id
+                WHERE s.country_id = country_id_val
+            )
+        );
+END;
+//
+DELIMITER ;
