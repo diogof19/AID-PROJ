@@ -94,6 +94,7 @@ CREATE TABLE neighbourhood (
     FOREIGN KEY (city_id) REFERENCES city(id)
 );
 
+-- change the location
 CREATE TABLE location (
     id INT PRIMARY KEY AUTO_INCREMENT,
     latitude FLOAT NOT NULL,
