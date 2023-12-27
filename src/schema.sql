@@ -69,7 +69,8 @@ CREATE TABLE host (
 
 CREATE TABLE country (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    country VARCHAR(100) NOT NULL
+    country VARCHAR(100) NOT NULL,
+    country_code VARCHAR(100) NOT NULL
 );
 
 CREATE TABLE state (
@@ -109,14 +110,14 @@ CREATE TABLE listing (
     price FLOAT NOT NULL,
     description TEXT,
     
-    review_scores_rating INT,
-    review_scores_accuracy INT,
-    review_scores_cleanliness INT,
-    review_scores_checkin INT,
-    review_scores_communication INT,
-    review_scores_location INT,
-    review_scores_value INT,
-    review_per_month FLOAT,
+    review_scores_rating FLOAT,
+    review_scores_accuracy FLOAT,
+    review_scores_cleanliness FLOAT,
+    review_scores_checkin FLOAT,
+    review_scores_communication FLOAT,
+    review_scores_location FLOAT,
+    review_scores_value FLOAT,
+    reviews_per_month FLOAT,
 
     availability_30 INT,
     availability_60 INT,
@@ -157,7 +158,7 @@ CREATE TABLE city_based_listing_statistics (
     price_min FLOAT NOT NULL,
     price_max FLOAT NOT NULL,
     price_average FLOAT NOT NULL,
-    FOREIGN KEY (city_id) REFERENCES city(id)
+    FOREIGN KEY (city_id) REFERENCES city(id) 
 );
 
 CREATE TABLE state_based_listing_statistics (
@@ -217,7 +218,7 @@ BEGIN
                 WHERE l3.neighbourhood_id = neighbourhood_id_val
             )
         );
-END;
+END;    
 //
 DELIMITER ;
 
